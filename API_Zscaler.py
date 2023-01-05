@@ -7,6 +7,9 @@ input_filename = 'URLS.txt'
 output_filename = 'output.csv'
 zscaler_filename = 'zscaler-infos.txt'
 
+# Set the chunk size for the API calls
+chunk_size = 100
+
 # Read the input file
 with open(input_filename, 'r') as file:
     # Read the lines in the file
@@ -15,8 +18,8 @@ with open(input_filename, 'r') as file:
 # Remove the newline characters from the lines
 lines = [line.strip() for line in lines]
 
-# Split the lines into chunks of 100 URLs
-url_chunks = [lines[i:i+100] for i in range(0, len(lines), 100)]
+# Split the lines into chunks of the specified size
+url_chunks = [lines[i:i+chunk_size] for i in range(0, len(lines), chunk_size)]
 
 # Load the Zscaler info from the file
 with open(zscaler_filename, 'r') as file:
@@ -61,42 +64,49 @@ if r.status_code != 200:
 # Extract the JSESSIONID from the response
 jsessionid = r.cookies['JSESSIONID']
 
+# Set the headers for the API calls
+headers = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache',
+    'Cookie': f'JSESSIONID={jsessionid}'
+}
+
 # Initialize the list of results
 results = []
 
-# Call the Zscaler API for each chunk of URLs
-for url_list in url_chunks:
-    # Call the Zscaler API with the list of URLs
-    headers = {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache'
-}
-data = {
-    'urls': url_list
-}
-r = requests.post(f'https://{host}/api/v1/urlLookup', headers=headers, json=data, cookies={'JSESSIONID': jsessionid})
+# Loop over the URL chunks
+for i, url_chunk in enumerate(url_chunks):
+    # Set the data for the API call
+    data = {
+        'urls': url_chunk
+    }
 
-# Check that the request was successful
-if r.status_code != 200:
-    print(f"Erreur {r.status_code} lors de l'appel de l'API")
-    exit()
+    # Call the API
+    r = requests.post(f'https://{host}/api/v1/urlLookup', headers=headers, json=data)
 
-# Extract the URL classification information from the response
-url_classification_data = r.json()
+    # Check that the request was successful
+    if r.status_code != 200:
+        print(f"Erreur {r.status_code} lors de l'appel API")
+        exit()
 
-# Add the URL classification information to the results
-for item in url_classification_data:
-    url = item['url']
-    categories = ';'.join(item['urlClassifications'])
-    results.append((url, categories))
+    # Get the response data
+    chunk_results = r.json()
 
-# Write the results to the output file
-with open(output_filename, 'w') as file:
+    # Append the results to the list
+    results += chunk_results
+
+# Open the output file
+with open(output_filename, 'w', newline='') as file:
+    # Create a CSV writer
+    writer = csv.writer(file, delimiter=';')
+
     # Write the header row
-    file.write('Numéro;URL;Catégories\n')
+    writer.writerow(['Numéro', 'URL', 'Catégories'])
+
     # Write the data rows
     for i, result in enumerate(results):
-        file.write(f"{i+1};{result[0]};{result[1]}\n")
+        categories = ', '.join(result['urlClassifications'])
+        writer.writerow([i+1, result['url'], categories])
 
 # Log out of the API
 r = requests.delete(f'https://{host}/api/v1/authenticatedSession', cookies={'JSESSIONID': jsessionid})
@@ -104,3 +114,5 @@ r = requests.delete(f'https://{host}/api/v1/authenticatedSession', cookies={'JSE
 # Check that the request was successful
 if r.status_code != 200:
     print(f"Erreur {r.status_code} lors de la déconnexion")
+
+print("Done!")
